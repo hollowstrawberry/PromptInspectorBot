@@ -22,7 +22,7 @@ else:
     with open(SCAN_CHANNELS_FILENAME, 'w'):
         scan_channels = set()
 
-bot = commands.Bot(intents=INTENTS, command_prefix="pi!")
+bot = commands.Bot(intents=INTENTS, command_prefix="pi!", auto_sync_commands=False)
 
 
 def read_info_from_image_stealth(image):
