@@ -22,6 +22,7 @@ else:
 
 bot = commands.Bot(intents=INTENTS, command_prefix="pi!")
 
+
 def read_info_from_image_stealth(image):
     width, height = image.size
     pixels = image.load()
@@ -33,12 +34,11 @@ def read_info_from_image_stealth(image):
     reading_param_len = False
     reading_param = False
     read_end = False
+    if len(pixels[0, 0]) < 4:
+        return None
     for x in range(width):
         for y in range(height):
-            try:
-                _, _, _, a = pixels[x, y]
-            except:
-                return None
+            _, _, _, a = pixels[x, y]
             buffer += str(a & 1)
             if confirming_signature:
                 if index == len('stealth_pnginfo') * 8 - 1:
@@ -75,6 +75,7 @@ def read_info_from_image_stealth(image):
         return decoded_data
     return None
 
+
 def get_params_from_string(param_str):
     output_dict = {}
     parts = param_str.split('Steps: ')
@@ -98,6 +99,7 @@ def get_params_from_string(param_str):
             pass
     return output_dict
 
+
 def get_embed(embed_dict: dict, author: Member):
     embed = Embed(title="Here's your image!", color=author.color)
     for key, value in embed_dict.items():
@@ -106,8 +108,8 @@ def get_embed(embed_dict: dict, author: Member):
     embed.set_footer(text=f'Posted by {author.name}#{author.discriminator}', icon_url=pfp)
     return embed
 
+
 async def read_attachment_metadata(i: int, attachment: Attachment, metadata: OrderedDict):
-    print("Downloading", i)
     try:
         image_data = await attachment.read()
         with Image.open(io.BytesIO(image_data)) as img:
@@ -119,9 +121,10 @@ async def read_attachment_metadata(i: int, attachment: Attachment, metadata: Ord
     else:
         print("Downloaded", i)
 
-# Get raw list of parameters for every image in requested post
+
 @bot.message_command(name="View Parameters")
 async def message_command(ctx: ApplicationContext, message: Message):
+    """Get raw list of parameters for every image in this post."""
     attachments = [a for a in message.attachments if a.filename.lower().endswith(".png")]
     if not attachments:
         await ctx.respond("This post contains no images.", ephemeral=True)
@@ -130,23 +133,25 @@ async def message_command(ctx: ApplicationContext, message: Message):
     metadata = OrderedDict()
     tasks = [read_attachment_metadata(i, attachment, metadata) for i, attachment in enumerate(attachments)]
     await asyncio.gather(*tasks)
-    if metadata:
-        response = "\n\n".join(metadata.values())
-        if len(response) < 1980:
-            await ctx.respond(f"```yaml\n{response}```", ephemeral=True)
-        else:
-            with io.StringIO() as f:
-                f.write(response)
-                f.seek(0)
-                await ctx.respond(file=File(f, "parameters.yaml"), ephemeral=True)
-    else:
+    if not metadata:
         await ctx.respond(f"This post contains no image generation data.\nTell {message.author.mention} to install [this extension](<https://github.com/ashen-sensored/sd_webui_stealth_pnginfo>).", ephemeral=True)
+        return
+    response = "\n\n".join(metadata.values())
+    if len(response) < 1980:
+        await ctx.respond(f"```yaml\n{response}```", ephemeral=True)
+    else:
+        with io.StringIO() as f:
+            f.write(response)
+            f.seek(0)
+            await ctx.respond(file=File(f, "parameters.yaml"), ephemeral=True)
+
 
 @bot.event
 async def on_message(message: Message):
     # Scan images in allowed channels
     if message.channel.id in scan_channels:
-        for i, attachment in enumerate(a for a in message.attachments if a.filename.lower().endswith(".png") and a.size < SCAN_LIMIT_BYTES):
+        attachments = [a for a in message.attachments if a.filename.lower().endswith(".png") and a.size < SCAN_LIMIT_BYTES]
+        for i, attachment in enumerate(attachments):
             metadata = OrderedDict()
             await read_attachment_metadata(i, attachment, metadata)
             if metadata:
@@ -172,35 +177,37 @@ async def on_message(message: Message):
         await message.reply('\n'.join([f'<#{int(i)}>' for i in ids if i.strip()]) or "*None*")
 
 
-# Send embed of parameters for first valid image in DMs
 @bot.event
 async def on_raw_reaction_add(ctx: RawReactionActionEvent):
-    if ctx.emoji.name == '🔎' and ctx.channel_id in scan_channels and not ctx.member.bot:
-        channel = bot.get_channel(ctx.channel_id)
-        message = await channel.fetch_message(ctx.message_id)
-        if not message:
-            return
-        attachments = [a for a in message.attachments if a.filename.lower().endswith(".png")]
-        if not attachments:
-            return
-        for i, attachment in enumerate(attachments):
-            metadata = OrderedDict()
-            await read_attachment_metadata(i, attachment, metadata)
-            if metadata:
-                embed = get_embed(get_params_from_string(metadata[0]), message.author)
-                embed.description = "You can also *right click a message -> Apps -> View Parameters*"
-                embed.set_thumbnail(url=attachment.url)
-                user_dm = await bot.get_user(ctx.user_id).create_dm()
-                await user_dm.send(embed=embed)
-                return
+    """Send image metadata in reacted post to user DMs"""
+    if ctx.emoji.name != '🔎' or ctx.channel_id not in scan_channels or ctx.member.bot:
+        return
+    channel = bot.get_channel(ctx.channel_id)
+    message = await channel.fetch_message(ctx.message_id)
+    if not message:
+        return
+    attachments = [a for a in message.attachments if a.filename.lower().endswith(".png")]
+    if not attachments:
+        return
+    metadata = OrderedDict()
+    tasks = [read_attachment_metadata(i, attachment, metadata) for i, attachment in enumerate(attachments)]
+    await asyncio.gather(*tasks)
+    user_dm = await bot.get_user(ctx.user_id).create_dm()
+    if not metadata:
         embed = get_embed({}, message.author)
         embed.description = f"This post contains no image generation data.\nTell {message.author.mention} to install [this extension](<https://github.com/ashen-sensored/sd_webui_stealth_pnginfo>)."
         embed.set_thumbnail(url=attachments[0].url)
-        user_dm = await bot.get_user(ctx.user_id).create_dm()
         await user_dm.send(embed=embed)
+        return
+    for attachment, data in [(attachments[i], data) for i, data in metadata.items()]:
+        embed = get_embed(get_params_from_string(data), message.author)
+        embed.set_thumbnail(url=attachment.url)
+        await user_dm.send(embed=embed)
+
 
 @bot.event
 async def on_ready():
     print(f"Logged in as {bot.user}!")
+
 
 bot.run(os.environ["BOT_TOKEN"])
