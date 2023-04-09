@@ -1,8 +1,10 @@
 import io
 import os
 import asyncio
+import discord
+from typing import List
 from collections import OrderedDict
-from discord import ApplicationContext, Intents, Message, Attachment, File, Embed, Member, RawReactionActionEvent
+from discord import Intents, Message, Member, Embed
 from discord.ext import commands
 from dotenv import load_dotenv
 from PIL import Image
@@ -109,7 +111,7 @@ def get_embed(embed_dict: dict, author: Member):
     return embed
 
 
-async def read_attachment_metadata(i: int, attachment: Attachment, metadata: OrderedDict):
+async def read_attachment_metadata(i: int, attachment: discord.Attachment, metadata: OrderedDict):
     try:
         image_data = await attachment.read()
         with Image.open(io.BytesIO(image_data)) as img:
@@ -123,7 +125,7 @@ async def read_attachment_metadata(i: int, attachment: Attachment, metadata: Ord
 
 
 @bot.message_command(name="View Parameters")
-async def message_command(ctx: ApplicationContext, message: Message):
+async def message_command(ctx: discord.ApplicationContext, message: Message):
     """Get raw list of parameters for every image in this post."""
     attachments = [a for a in message.attachments if a.filename.lower().endswith(".png")]
     if not attachments:
@@ -143,7 +145,7 @@ async def message_command(ctx: ApplicationContext, message: Message):
         with io.StringIO() as f:
             f.write(response)
             f.seek(0)
-            await ctx.respond(file=File(f, "parameters.yaml"), ephemeral=True)
+            await ctx.respond(file=discord.File(f, "parameters.yaml"), ephemeral=True)
 
 
 @bot.event
@@ -157,28 +159,11 @@ async def on_message(message: Message):
             if metadata:
                 await message.add_reaction('🔎')
                 return
-    # Owner commands
-    if not message.content.startswith('pi!') or not await bot.is_owner(message.author):
-        return
-    args = message.content.split('pi!')[1].split(' ')
-    if args[0] == "channeladd":
-        scan_channels.update(int(ch) for ch in args[1:])
-        with open(SCAN_CHANNELS_FILENAME, 'w') as f:
-            f.write('\n'.join([str(ch) for ch in scan_channels]))
-        await message.reply('✅')
-    elif args[0] == "channelremove":
-        scan_channels.difference_update(int(ch) for ch in args[1:])
-        with open(SCAN_CHANNELS_FILENAME, 'w') as f:
-            f.write('\n'.join([str(ch) for ch in scan_channels]))
-        await message.reply('✅')
-    elif args[0] == "channellist":
-        with open(SCAN_CHANNELS_FILENAME, 'r') as f:
-            ids = f.read().split("\n")
-        await message.reply('\n'.join([f'<#{int(i)}>' for i in ids if i.strip()]) or "*None*")
+    await bot.process_commands(message)
 
 
 @bot.event
-async def on_raw_reaction_add(ctx: RawReactionActionEvent):
+async def on_raw_reaction_add(ctx: discord.RawReactionActionEvent):
     """Send image metadata in reacted post to user DMs"""
     if ctx.emoji.name != '🔎' or ctx.channel_id not in scan_channels or ctx.member.bot:
         return
@@ -203,6 +188,31 @@ async def on_raw_reaction_add(ctx: RawReactionActionEvent):
         embed = get_embed(get_params_from_string(data), message.author)
         embed.set_thumbnail(url=attachment.url)
         await user_dm.send(embed=embed)
+
+
+@bot.group(invoke_without_command=True)
+@commands.is_owner()
+async def channel(ctx: commands.Context):
+    """Owner command to manage channels where images are scanned."""
+    await ctx.reply(f"**Usage:** ```\n{ctx.prefix}channel add <channels>\n{ctx.prefix}channel remove <channels>\n{ctx.prefix}channel list```")
+
+@channel.command()
+async def add(ctx: commands.Context, channels: List[discord.TextChannel]):
+    scan_channels.update(ch.id for ch in channels)
+    with open(SCAN_CHANNELS_FILENAME, 'w') as f:
+        f.write('\n'.join([str(id) for id in scan_channels]))
+    await ctx.reply('✅')
+
+@channel.command()
+async def remove(ctx: commands.Context, channels: List[discord.TextChannel]):
+    scan_channels.difference_update(ch.id for ch in channels)
+    with open(SCAN_CHANNELS_FILENAME, 'w') as f:
+        f.write('\n'.join([str(id) for id in scan_channels]))
+    await ctx.reply('✅')
+
+@channel.command()
+async def list(ctx: commands.Context):
+    await ctx.reply('\n'.join([f'<#{id}>' for id in scan_channels]) or "*None*")
 
 
 @bot.event
