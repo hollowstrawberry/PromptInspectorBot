@@ -140,7 +140,7 @@ async def message_command(ctx: ApplicationContext, message: Message):
                 f.seek(0)
                 await ctx.respond(file=File(f, "parameters.yaml"), ephemeral=True)
     else:
-        await ctx.respond(f"This post contains no image generation data.\nTell {ctx.author.mention} to install [this extension](<https://github.com/ashen-sensored/sd_webui_stealth_pnginfo>).", ephemeral=True)
+        await ctx.respond(f"This post contains no image generation data.\nTell {message.author.mention} to install [this extension](<https://github.com/ashen-sensored/sd_webui_stealth_pnginfo>).", ephemeral=True)
 
 @bot.event
 async def on_message(message: Message):
@@ -187,14 +187,14 @@ async def on_raw_reaction_add(ctx: RawReactionActionEvent):
             metadata = OrderedDict()
             await read_attachment_metadata(i, attachment, metadata)
             if metadata:
-                embed = get_embed(get_params_from_string(metadata[0]), ctx.member)
+                embed = get_embed(get_params_from_string(metadata[0]), message.author)
                 embed.description = "You can also *right click a message -> Apps -> View Parameters*"
                 embed.set_thumbnail(url=attachment.url)
                 user_dm = await bot.get_user(ctx.user_id).create_dm()
                 await user_dm.send(embed=embed)
                 return
-        embed = get_embed({}, ctx.member)
-        embed.description = f"This post contains no image generation data.\nTell {ctx.member.mention} to install [this extension](<https://github.com/ashen-sensored/sd_webui_stealth_pnginfo>)."
+        embed = get_embed({}, message.author)
+        embed.description = f"This post contains no image generation data.\nTell {message.author.mention} to install [this extension](<https://github.com/ashen-sensored/sd_webui_stealth_pnginfo>)."
         embed.set_thumbnail(url=attachments[0].url)
         user_dm = await bot.get_user(ctx.user_id).create_dm()
         await user_dm.send(embed=embed)
